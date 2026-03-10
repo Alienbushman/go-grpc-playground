@@ -1,0 +1,27 @@
+# Compiled binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# Environment files — copy .env.example and fill in values, never commit .env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

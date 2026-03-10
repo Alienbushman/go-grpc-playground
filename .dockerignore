@@ -1,0 +1,30 @@
+# Version control
+.git
+.gitignore
+
+# Docs
+*.md
+.claude/
+
+# Local build artifacts
+bin/
+
+# Environment files — never bake secrets into the image
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+*.test
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
