@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package item.v1;
+
+import "google/api/annotations.proto";
+
+option go_package = "github.com/rick/grpc-go-experimentation/gen/item;itemv1";
+
+// Item represents a single item record.
+message Item {
+  string id         = 1;
+  string name       = 2;
+  string created_at = 3;
+  string updated_at = 4;
+}
+
+// ----- Create -----
+
+message CreateItemRequest {
+  string name = 1;
+}
+
+message CreateItemResponse {
+  Item item = 1;
+}
+
+// ----- Get -----
+
+message GetItemRequest {
+  string id = 1;
+}
+
+message GetItemResponse {
+  Item item = 1;
+}
+
+// ----- Update -----
+
+message UpdateItemRequest {
+  string id   = 1;
+  string name = 2;
+}
+
+message UpdateItemResponse {
+  Item item = 1;
+}
+
+// ----- Delete -----
+
+message DeleteItemRequest {
+  string id = 1;
+}
+
+message DeleteItemResponse {}
+
+// ----- Service -----
+
+service ItemService {
+  rpc CreateItem(CreateItemRequest) returns (CreateItemResponse) {
+    option (google.api.http) = {
+      post: "/v1/items"
+      body: "*"
+    };
+  }
+  rpc GetItem(GetItemRequest) returns (GetItemResponse) {
+    option (google.api.http) = {
+      get: "/v1/items/{id}"
+    };
+  }
+  rpc UpdateItem(UpdateItemRequest) returns (UpdateItemResponse) {
+    option (google.api.http) = {
+      put: "/v1/items/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteItem(DeleteItemRequest) returns (DeleteItemResponse) {
+    option (google.api.http) = {
+      delete: "/v1/items/{id}"
+    };
+  }
+}
