@@ -37,6 +37,7 @@ It is intentionally simple. The goal is correctness and clarity, not scale.
 | `protoc-gen-go`             | 1.36           | `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`                            |
 | `protoc-gen-go-grpc`        | 1.6            | `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`                          |
 | `protoc-gen-grpc-gateway`   | 2.28+          | `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest`      |
+| `protoc-gen-openapiv2`      | 2.28+          | `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest`         |
 | `mockery`                   | 2.53+          | `go install github.com/vektra/mockery/v2@latest`                                            |
 | `mage`                      | 1.16+          | `go install github.com/magefile/mage@latest`                                                |
 | Docker Desktop              | 27+            | https://www.docker.com/products/docker-desktop/ (runs Postgres)                            |
@@ -48,25 +49,71 @@ No standalone PostgreSQL installation required — Postgres runs in Docker.
 
 ## Quick Start
 
+### Option A — Full Docker (no Go toolchain required)
+
+Only Docker Desktop is needed.
+
 ```bash
 # 1. Clone
 git clone <repo-url>
-cd gprc-go-experimentation
+cd go-grpc-playground
 
-# 2. Install Go dependencies
+# 2. Build and start everything (Postgres + migrations + server)
+docker compose --profile full up --build
+```
+
+The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080`.
+
+To stop and remove containers:
+
+```bash
+docker compose --profile full down
+```
+
+---
+
+### Option B — Local Go + Docker Postgres
+
+Requires Go 1.26+, Docker Desktop, and `protoc`. Go-based tools are installed via `go install`.
+
+```bash
+# 1. Clone
+git clone <repo-url>
+cd go-grpc-playground
+
+# 2. Download Go module dependencies
 go mod download
 
-# 3. Start Postgres and apply migrations
+# 3. Install protoc (separate binary — not via go install)
+#    See https://grpc.io/docs/protoc-installation/ for your OS
+
+# 4. Install Go-based tools (mage, mockery, protoc plugins, grpcurl)
+go install github.com/magefile/mage@latest
+go install github.com/vektra/mockery/v2@latest
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
+go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
+go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+
+# 5. Generate proto bindings and mocks (gen/ and mocks/ are not committed)
+mage gen
+mage mock
+
+# 6. Start Postgres and apply migrations
 mage db:migrateUp
 
-# 4. Start the server
+# 7. Run the server (DATABASE_URL defaults to the local Docker Postgres)
 mage run
 ```
 
 The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by default.
 
-> **Port note:** Docker Compose binds Postgres to `5433` (not `5432`) because `5432` may
-> already be in use. The `DATABASE_URL` above reflects this.
+> **Port note:** When running locally (Option B), Docker Compose binds Postgres to `5433`
+> (not `5432`) to avoid conflicts. `mage run` defaults `DATABASE_URL` to
+> `postgres://grpc:grpc@localhost:5433/grpc_experiment?sslmode=disable` when the variable
+> is not set. In the full Docker setup (Option A), the server connects to Postgres
+> container-internally on port `5432`.
 
 ---
 
@@ -74,7 +121,7 @@ The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by defa
 
 | Variable       | Required | Default  | Description                         |
 |----------------|----------|----------|-------------------------------------|
-| `DATABASE_URL` | Yes      | —        | Full PostgreSQL connection string   |
+| `DATABASE_URL` | Yes      | —        | Full PostgreSQL connection string (`mage run` supplies a local default) |
 | `GRPC_PORT`    | No       | `50051`  | Port for the gRPC listener          |
 | `HTTP_PORT`    | No       | `8080`   | Port for the HTTP/JSON gateway      |
 
@@ -86,7 +133,10 @@ The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by defa
 .
 ├── CLAUDE.md                   # AI agent conventions — read before making changes
 ├── README.md                   # This file
-├── docker-compose.yml          # Postgres 16, localhost:5433
+├── API_TESTING.md              # grpcurl and curl examples for all RPCs
+├── DEPLOYMENT.md               # Docker image builds and Linux binary export
+├── Dockerfile                  # Multi-stage build — static binary on Alpine
+├── docker-compose.yml          # Postgres 16 (localhost:5433) + optional full stack
 ├── magefile.go                 # Go-native build targets (mage up, mage test, etc.)
 ├── .mockery.yaml               # Mockery config — interfaces to generate mocks for
 ├── .claude/
@@ -94,15 +144,16 @@ The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by defa
 ├── proto/                      # Service definitions (source of truth)
 │   └── item/
 │       └── item.proto
-├── third_party/                # Vendored proto dependencies
+├── third_party/                # Vendored proto dependencies (gitignored — see note below)
 │   └── googleapis/
 │       └── google/api/         # google/api/annotations.proto, http.proto
-├── gen/                        # Generated proto code — DO NOT edit manually
+├── gen/                        # Generated proto code — DO NOT edit manually (gitignored)
 │   └── item/
 │       ├── item.pb.go
 │       ├── item_grpc.pb.go
-│       └── item.pb.gw.go       # gRPC-Gateway HTTP handlers
-├── mocks/                      # Mockery-generated mocks — DO NOT edit manually
+│       ├── item.pb.gw.go       # gRPC-Gateway HTTP handlers
+│       └── item.swagger.json   # OpenAPI spec (generated by mage gen)
+├── mocks/                      # Mockery-generated mocks — DO NOT edit manually (gitignored)
 │   └── repository/
 │       └── mock_ItemRepository.go
 ├── cmd/
@@ -121,181 +172,18 @@ The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by defa
 │   └── 000001_create_items.down.sql
 ```
 
----
-
-## Testing the API (end-to-end)
-
-The server exposes two interfaces:
-- **gRPC** on `:50051` — use `grpcurl` (reflection is registered)
-- **HTTP/JSON** on `:8080` — use `curl` or any HTTP client (via the grpc-gateway)
-
-If you’d like a Swagger/OpenAPI description of the HTTP gateway you can
-generate a spec with the built‑in mage target (requires the
-`protoc-gen-openapiv2` plugin). Run:
-
-```bash
-mage gen          # Go, gRPC, gateway handlers _and_ swagger spec
-```
-
-and the file will appear in `gen/item/item.swagger.json` (or
-`item.openapi.json`). You can check it in or serve it from the gateway to
-power Swagger UI, Redoc, etc. Example snippet for `cmd/server/main.go`:
-
-```go
-// serve swagger from generated file
-mux.HandlePath("GET", "/swagger.json", func(w http.ResponseWriter, r *http.Request) {
-    http.ServeFile(w, r, "gen/item/item.swagger.json")
-})
-```
-
-or just run `grpcui` against the gRPC port for a live Explorer UI
-(doesn’t require a spec).
-
-### List available services (gRPC)
-
-```bash
-grpcurl -plaintext localhost:50051 list
-```
-
-### CreateItem
-
-```bash
-grpcurl -plaintext \
-  -d '{"name": "my first item"}' \
-  localhost:50051 item.v1.ItemService/CreateItem
-```
-
-```json
-{
-  "item": {
-    "id": "9d69498d-c582-4c22-bbb4-658913dcab9a",
-    "name": "my first item",
-    "createdAt": "2026-03-10T14:41:20+02:00",
-    "updatedAt": "2026-03-10T14:41:20+02:00"
-  }
-}
-```
-
-### GetItem
-
-```bash
-grpcurl -plaintext \
-  -d '{"id": "9d69498d-c582-4c22-bbb4-658913dcab9a"}' \
-  localhost:50051 item.v1.ItemService/GetItem
-```
-
-```json
-{
-  "item": {
-    "id": "9d69498d-c582-4c22-bbb4-658913dcab9a",
-    "name": "my first item",
-    "createdAt": "2026-03-10T14:41:20+02:00",
-    "updatedAt": "2026-03-10T14:41:20+02:00"
-  }
-}
-```
-
-### UpdateItem
-
-```bash
-grpcurl -plaintext \
-  -d '{"id": "9d69498d-c582-4c22-bbb4-658913dcab9a", "name": "renamed item"}' \
-  localhost:50051 item.v1.ItemService/UpdateItem
-```
-
-```json
-{
-  "item": {
-    "id": "9d69498d-c582-4c22-bbb4-658913dcab9a",
-    "name": "renamed item",
-    "createdAt": "2026-03-10T14:41:20+02:00",
-    "updatedAt": "2026-03-10T15:00:00+02:00"
-  }
-}
-```
-
-### DeleteItem
-
-```bash
-grpcurl -plaintext \
-  -d '{"id": "9d69498d-c582-4c22-bbb4-658913dcab9a"}' \
-  localhost:50051 item.v1.ItemService/DeleteItem
-```
-
-```json
-{}
-```
-
-### Error cases (gRPC)
-
-```bash
-# Missing name → InvalidArgument
-grpcurl -plaintext -d '{"name": ""}' localhost:50051 item.v1.ItemService/CreateItem
-# ERROR: Code: InvalidArgument  Message: name is required
-
-# Unknown ID → NotFound
-grpcurl -plaintext \
-  -d '{"id": "00000000-0000-0000-0000-000000000000"}' \
-  localhost:50051 item.v1.ItemService/GetItem
-# ERROR: Code: NotFound  Message: item "00000000-0000-0000-0000-000000000000" not found
-```
+> **Note on gitignored generated directories:** `gen/`, `mocks/`, and `third_party/` are
+> not committed. Run `mage gen` and `mage mock` after cloning to recreate them (Option B
+> step 4). `third_party/` contains vendored googleapis proto files required by `mage gen`;
+> if it is absent, `protoc` will fail — restore it from the
+> [googleapis repository](https://github.com/googleapis/googleapis) or re-vendor it.
 
 ---
 
-## Testing the API (HTTP/JSON gateway)
+## Testing the API
 
-The same operations are available over HTTP on `:8080`.
-
-### CreateItem
-
-```bash
-curl -s -X POST http://localhost:8080/v1/items \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "my first item"}'
-```
-
-```json
-{
-  "item": {
-    "id": "9d69498d-c582-4c22-bbb4-658913dcab9a",
-    "name": "my first item",
-    "createdAt": "2026-03-10T12:00:00Z",
-    "updatedAt": "2026-03-10T12:00:00Z"
-  }
-}
-```
-
-### GetItem
-
-```bash
-curl -s http://localhost:8080/v1/items/9d69498d-c582-4c22-bbb4-658913dcab9a
-```
-
-### UpdateItem
-
-```bash
-curl -s -X PUT http://localhost:8080/v1/items/9d69498d-c582-4c22-bbb4-658913dcab9a \
-  -H 'Content-Type: application/json' \
-  -d '{"name": "renamed item"}'
-```
-
-### DeleteItem
-
-```bash
-curl -s -X DELETE http://localhost:8080/v1/items/9d69498d-c582-4c22-bbb4-658913dcab9a
-```
-
-### Error cases (HTTP)
-
-```bash
-# Missing name → 400 Bad Request
-curl -s -X POST http://localhost:8080/v1/items -H 'Content-Type: application/json' -d '{}'
-# {"code": 3, "message": "name is required", "details": []}
-
-# Unknown ID → 404 Not Found
-curl -s http://localhost:8080/v1/items/00000000-0000-0000-0000-000000000000
-# {"code": 5, "message": "item \"00000000-0000-0000-0000-000000000000\" not found", "details": []}
-```
+See [API_TESTING.md](API_TESTING.md) for full `grpcurl` and `curl` examples covering all
+CRUD operations, error cases, and Swagger/OpenAPI generation.
 
 ---
 
@@ -323,6 +211,11 @@ mage coverAll        # coverage report: all tests (requires DATABASE_URL) → co
 mage stack:up        # full stack in Docker (postgres + migrate + server)
 mage stack:down      # stop full stack
 ```
+
+### Deployment (Docker images and Linux binaries)
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for cross-platform Docker builds, standalone image
+usage, and exporting static Linux binaries without Docker.
 
 ### Run tests manually
 
