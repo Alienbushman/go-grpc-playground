@@ -25,3 +25,8 @@ coverage.html
 # OS
 .DS_Store
 Thumbs.db
+/mocks/repository/mock_ItemRepository.go
+/.claude/
+/.proxyai/
+/gen/
+/mocks/
