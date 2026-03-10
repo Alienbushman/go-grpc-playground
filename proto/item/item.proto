@@ -4,7 +4,7 @@ package item.v1;
 
 import "google/api/annotations.proto";
 
-option go_package = "github.com/rick/grpc-go-experimentation/gen/item;itemv1";
+option go_package = "github.com/Alienbushman/go-grpc-playground/gen/item;itemv1";
 
 // Item represents a single item record.
 message Item {

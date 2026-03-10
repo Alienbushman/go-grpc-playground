@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
+	mockrepository "github.com/Alienbushman/go-grpc-playground/mocks/repository"
 	"github.com/jackc/pgx/v5"
-	mockrepository "github.com/rick/grpc-go-experimentation/mocks/repository"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -31,9 +31,9 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
-	itemv1 "github.com/rick/grpc-go-experimentation/gen/item"
-	"github.com/rick/grpc-go-experimentation/internal/repository"
-	"github.com/rick/grpc-go-experimentation/internal/server"
+	itemv1 "github.com/Alienbushman/go-grpc-playground/gen/item"
+	"github.com/Alienbushman/go-grpc-playground/internal/repository"
+	"github.com/Alienbushman/go-grpc-playground/internal/server"
 )
 
 const bufSize = 1024 * 1024

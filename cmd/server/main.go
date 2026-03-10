@@ -16,9 +16,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 
-	itemv1 "github.com/rick/grpc-go-experimentation/gen/item"
-	"github.com/rick/grpc-go-experimentation/internal/repository"
-	"github.com/rick/grpc-go-experimentation/internal/server"
+	itemv1 "github.com/Alienbushman/go-grpc-playground/gen/item"
+	"github.com/Alienbushman/go-grpc-playground/internal/repository"
+	"github.com/Alienbushman/go-grpc-playground/internal/server"
 )
 
 func main() {

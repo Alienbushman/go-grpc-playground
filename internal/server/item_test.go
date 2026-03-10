@@ -12,8 +12,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	itemv1 "github.com/rick/grpc-go-experimentation/gen/item"
-	"github.com/rick/grpc-go-experimentation/internal/repository"
+	itemv1 "github.com/Alienbushman/go-grpc-playground/gen/item"
+	"github.com/Alienbushman/go-grpc-playground/internal/repository"
 )
 
 // mockItemRepo is a hand-written test double for ItemRepository.
