@@ -1,0 +1,58 @@
+services:
+
+  # ── Database ────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: grpc_experiment_db
+    environment:
+      POSTGRES_USER: grpc
+      POSTGRES_PASSWORD: grpc
+      POSTGRES_DB: grpc_experiment
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grpc -d grpc_experiment"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Migrations (one-shot, full profile only) ────────────────────────────────
+  migrate:
+    image: postgres:16-alpine
+    container_name: grpc_experiment_migrate
+    profiles: [full]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: grpc
+    volumes:
+      - ./migrations:/migrations:ro
+    command: >
+      sh -c "
+        psql -h postgres -U grpc -d grpc_experiment -f /migrations/000001_create_items.up.sql &&
+        echo 'migrations applied'
+      "
+    restart: on-failure
+
+  # ── Application server (full profile only) ──────────────────────────────────
+  server:
+    build: .
+    container_name: grpc_experiment_server
+    profiles: [full]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://grpc:grpc@postgres:5432/grpc_experiment?sslmode=disable
+      GRPC_PORT: "50051"
+      HTTP_PORT: "8080"
+    ports:
+      - "50051:50051"
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

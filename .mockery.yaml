@@ -1,0 +1,11 @@
+with-expecter: true
+resolve-type-alias: false
+disable-version-string: true
+issue-845-fix: true
+packages:
+  github.com/rick/grpc-go-experimentation/internal/repository:
+    config:
+      dir: mocks/repository
+      outpkg: mockrepository
+    interfaces:
+      ItemRepository:
