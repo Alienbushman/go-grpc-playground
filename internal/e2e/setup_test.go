@@ -1,7 +1,8 @@
 //go:build e2e
 
-// Package e2e contains end-to-end tests that exercise the full gRPC stack:
-// a real gRPC server and a real PostgreSQL database. No mocks are used.
+// Package e2e contains end-to-end tests that exercise the full stack:
+// a real gRPC server, a real HTTP/JSON gateway (with swagger), and a real
+// PostgreSQL database. No mocks are used at any layer.
 //
 // Run with: go test -tags=e2e ./internal/e2e/...
 // Or via mage: mage testE2E
@@ -12,15 +13,18 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/jackc/pgx/v5/pgxpool"
 	tc "github.com/testcontainers/testcontainers-go"
 	pgmodule "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	itemv1 "github.com/Alienbushman/go-grpc-playground/gen/item"
 	"github.com/Alienbushman/go-grpc-playground/internal/repository"
@@ -91,19 +95,19 @@ func runE2E(m *testing.M) int {
 		return 1
 	}
 
-	stopServer, err := startGRPCServer(pool)
+	stopServers, err := startServers(ctx, pool)
 	if err != nil {
 		pool.Close()
 		if pgc != nil {
 			pgc.Terminate(ctx) //nolint:errcheck
 		}
-		fmt.Fprintf(os.Stderr, "e2e: start server: %v\n", err)
+		fmt.Fprintf(os.Stderr, "e2e: start servers: %v\n", err)
 		return 1
 	}
 
 	code := m.Run()
 
-	stopServer()
+	stopServers()
 	pool.Close()
 	if pgc != nil {
 		if err := pgc.Terminate(ctx); err != nil {
@@ -113,28 +117,59 @@ func runE2E(m *testing.M) int {
 	return code
 }
 
-// startGRPCServer wires the real dependency graph and starts a gRPC server on
-// a random localhost port. Sets the package-level grpcAddr. Returns a stop func.
-func startGRPCServer(pool *pgxpool.Pool) (stop func(), err error) {
+// startServers wires the real dependency graph, starts a gRPC server and an
+// HTTP/JSON gateway (including the swagger endpoint) on random localhost ports.
+// Sets the package-level grpcAddr. Returns a stop function.
+func startServers(ctx context.Context, pool *pgxpool.Pool) (stop func(), err error) {
 	itemRepo := repository.NewItemRepository(pool)
 	itemSrv := server.NewItemServer(itemRepo)
 
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	// gRPC server on a random port.
+	grpcLis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("listen: %w", err)
+		return nil, fmt.Errorf("listen grpc: %w", err)
 	}
-
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(server.UnaryLoggingInterceptor),
+	)
 	itemv1.RegisterItemServiceServer(grpcServer, itemSrv)
-
 	go func() {
-		if err := grpcServer.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+		if err := grpcServer.Serve(grpcLis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			fmt.Fprintf(os.Stderr, "e2e grpc server: %v\n", err)
 		}
 	}()
+	grpcAddr = grpcLis.Addr().String()
 
-	grpcAddr = lis.Addr().String()
-	return grpcServer.GracefulStop, nil
+	// HTTP/JSON gateway on a separate random port, mirroring the production
+	// setup in main.go — including the swagger endpoint.
+	mux := runtime.NewServeMux()
+	mux.HandlePath("GET", "/swagger.json", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		// Path is relative to the package directory (internal/e2e/).
+		http.ServeFile(w, r, "../../gen/item/item.swagger.json")
+	})
+
+	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	if err := itemv1.RegisterItemServiceHandlerFromEndpoint(ctx, mux, grpcAddr, dialOpts); err != nil {
+		grpcServer.Stop()
+		return nil, fmt.Errorf("register gateway: %w", err)
+	}
+
+	httpLis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		grpcServer.Stop()
+		return nil, fmt.Errorf("listen http: %w", err)
+	}
+	httpServer := &http.Server{Handler: mux}
+	go func() {
+		if err := httpServer.Serve(httpLis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintf(os.Stderr, "e2e http server: %v\n", err)
+		}
+	}()
+
+	return func() {
+		grpcServer.GracefulStop()
+		httpServer.Shutdown(context.Background()) //nolint:errcheck
+	}, nil
 }
 
 // applyMigrations runs all up-migrations against the pool.

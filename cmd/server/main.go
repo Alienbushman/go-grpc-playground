@@ -22,6 +22,8 @@ import (
 )
 
 func main() {
+	initLogger()
+
 	dsn := mustEnv("DATABASE_URL")
 	grpcPort := envOrDefault("GRPC_PORT", "50051")
 	httpPort := envOrDefault("HTTP_PORT", "8080")
@@ -51,7 +53,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(server.UnaryLoggingInterceptor),
+	)
 	itemv1.RegisterItemServiceServer(grpcServer, itemSrv)
 	reflection.Register(grpcServer) // enables grpcurl without a proto file
 
@@ -103,6 +107,28 @@ func main() {
 		slog.Error("HTTP gateway shutdown error", "error", err)
 	}
 	slog.Info("servers stopped")
+}
+
+// initLogger configures the default slog logger from environment variables:
+//
+//	LOG_LEVEL  — debug | info | warn | error  (default: info)
+//	LOG_FORMAT — text | json                  (default: text)
+func initLogger() {
+	level := slog.LevelInfo
+	if v := os.Getenv("LOG_LEVEL"); v != "" {
+		if err := level.UnmarshalText([]byte(v)); err != nil {
+			slog.Warn("invalid LOG_LEVEL, using info", "value", v)
+		}
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var h slog.Handler
+	if os.Getenv("LOG_FORMAT") == "json" {
+		h = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		h = slog.NewTextHandler(os.Stdout, opts)
+	}
+	slog.SetDefault(slog.New(h))
 }
 
 func mustEnv(key string) string {
