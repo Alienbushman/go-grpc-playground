@@ -33,7 +33,7 @@ It is intentionally simple. The goal is correctness and clarity, not scale.
 | Tool                        | Version tested | Install                                                                                     |
 |-----------------------------|----------------|---------------------------------------------------------------------------------------------|
 | Go                          | 1.26           | https://go.dev/dl/                                                                          |
-| `protoc`                    | 34.0           | https://grpc.io/docs/protoc-installation/                                                   |
+| `buf`                       | 1.50+          | `go install github.com/bufbuild/buf/cmd/buf@latest`                                         |
 | `protoc-gen-go`             | 1.36           | `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`                            |
 | `protoc-gen-go-grpc`        | 1.6            | `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`                          |
 | `protoc-gen-grpc-gateway`   | 2.28+          | `go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest`      |
@@ -54,11 +54,7 @@ No standalone PostgreSQL installation required — Postgres runs in Docker.
 Only Docker Desktop is needed.
 
 ```bash
-# 1. Clone
-git clone <repo-url>
-cd go-grpc-playground
-
-# 2. Build and start everything (Postgres + migrations + server)
+# 1. Build and start everything (Postgres + migrations + server)
 docker compose --profile full up --build
 ```
 
@@ -74,21 +70,15 @@ docker compose --profile full down
 
 ### Option B — Local Go + Docker Postgres
 
-Requires Go 1.26+, Docker Desktop, and `protoc`. Go-based tools are installed via `go install`.
+Requires Go 1.26+ and Docker Desktop. All tools are installed via `go install`.
 
 ```bash
-# 1. Clone
-git clone <repo-url>
-cd go-grpc-playground
-
-# 2. Download Go module dependencies
+# 1. Download Go module dependencies
 go mod download
 
-# 3. Install protoc (separate binary — not via go install)
-#    See https://grpc.io/docs/protoc-installation/ for your OS
-
-# 4. Install Go-based tools (mage, mockery, protoc plugins, grpcurl)
+# 2. Install tools
 go install github.com/magefile/mage@latest
+go install github.com/bufbuild/buf/cmd/buf@latest
 go install github.com/vektra/mockery/v2@latest
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
@@ -96,14 +86,16 @@ go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@lat
 go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
 go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 
-# 5. Generate proto bindings and mocks (gen/ and mocks/ are not committed)
-mage gen
-mage mock
+# 3. Fetch buf dependencies (generates buf.lock — only needed once after cloning)
+buf dep update
 
-# 6. Start Postgres and apply migrations
+# 4. Generate proto bindings and mocks (gen/ and mocks/ are not committed; mock is called by gen)
+mage gen
+
+# 5. Start Postgres and apply migrations
 mage db:migrateUp
 
-# 7. Run the server (DATABASE_URL defaults to the local Docker Postgres)
+# 6. Run the server (DATABASE_URL defaults to the local Docker Postgres)
 mage run
 ```
 
@@ -144,9 +136,9 @@ The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by defa
 ├── proto/                      # Service definitions (source of truth)
 │   └── item/
 │       └── item.proto
-├── third_party/                # Vendored proto dependencies (gitignored — see note below)
-│   └── googleapis/
-│       └── google/api/         # google/api/annotations.proto, http.proto
+├── buf.yaml                    # buf module config (BSR deps)
+├── buf.gen.yaml                # buf code generation config
+├── buf.lock                    # buf dependency lock file
 ├── gen/                        # Generated proto code — DO NOT edit manually (gitignored)
 │   └── item/
 │       ├── item.pb.go
@@ -172,11 +164,9 @@ The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by defa
 │   └── 000001_create_items.down.sql
 ```
 
-> **Note on gitignored generated directories:** `gen/`, `mocks/`, and `third_party/` are
-> not committed. Run `mage gen` and `mage mock` after cloning to recreate them (Option B
-> step 4). `third_party/` contains vendored googleapis proto files required by `mage gen`;
-> if it is absent, `protoc` will fail — restore it from the
-> [googleapis repository](https://github.com/googleapis/googleapis) or re-vendor it.
+> **Note on gitignored generated directories:** `gen/` and `mocks/` are not committed.
+> Run `mage gen` after cloning to recreate them — it also regenerates mocks automatically.
+> `buf.lock` is committed and pins the BSR dependency versions — do not delete it.
 
 ---
 

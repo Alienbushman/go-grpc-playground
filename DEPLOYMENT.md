@@ -5,25 +5,17 @@ builder stage, and the final image is a minimal Alpine container with no Go tool
 
 ---
 
-## Build for the host platform
+## Build a Docker image
 
 ```bash
-docker build -t grpc-server:latest .
-```
+# Host platform → grpc-server:latest
+mage docker:build
 
----
+# Linux amd64 (most cloud VMs and servers) → grpc-server:amd64
+mage docker:buildAmd64
 
-## Build for a specific Linux architecture
-
-Use `--platform` to cross-compile for a target that differs from your machine.
-Common targets:
-
-```bash
-# Linux x86-64 (most cloud VMs and servers)
-docker build --platform linux/amd64 -t grpc-server:amd64 .
-
-# Linux ARM64 (AWS Graviton, Apple Silicon servers)
-docker build --platform linux/arm64 -t grpc-server:arm64 .
+# Linux arm64 (AWS Graviton, Apple Silicon servers) → grpc-server:arm64
+mage docker:buildArm64
 ```
 
 > Docker BuildKit is required for cross-platform builds. It is enabled by default in
@@ -44,18 +36,14 @@ docker run --rm \
 
 ---
 
-## Export the binary without Docker
-
-To produce a Linux binary directly from Go (no Docker required):
+## Export a static Linux binary (no Docker required)
 
 ```bash
-# amd64
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-  go build -ldflags="-s -w" -o bin/server-linux-amd64 ./cmd/server
+# amd64 → bin/server-linux-amd64
+mage buildLinuxAmd64
 
-# arm64
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
-  go build -ldflags="-s -w" -o bin/server-linux-arm64 ./cmd/server
+# arm64 → bin/server-linux-arm64
+mage buildLinuxArm64
 ```
 
 The resulting binary is statically linked and has no runtime dependencies — copy it to

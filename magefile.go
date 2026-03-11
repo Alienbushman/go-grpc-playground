@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"time"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
@@ -16,6 +16,8 @@ import (
 const (
 	defaultDatabaseURL = "postgres://grpc:grpc@localhost:5433/grpc_experiment?sslmode=disable"
 	bin                = "bin/server"
+	binLinuxAmd64      = "bin/server-linux-amd64"
+	binLinuxArm64      = "bin/server-linux-arm64"
 	container          = "grpc_experiment_db"
 	migrationUp        = "migrations/000001_create_items.up.sql"
 	migrationDown      = "migrations/000001_create_items.down.sql"
@@ -30,6 +32,9 @@ func databaseURL() string {
 
 // DB groups database-related targets.
 type DB mg.Namespace
+
+// Docker groups Docker image build targets.
+type Docker mg.Namespace
 
 // Stack groups full-stack docker compose targets.
 type Stack mg.Namespace
@@ -71,30 +76,13 @@ func (DB) MigrateDown() error {
 
 // Gen regenerates proto bindings from all proto files under proto/.
 func Gen() error {
-	gopath, err := sh.Output("go", "env", "GOPATH")
-	if err != nil {
-		return fmt.Errorf("go env GOPATH: %w", err)
-	}
-	env := map[string]string{
-		"PATH": os.Getenv("PATH") + string(os.PathListSeparator) + filepath.Join(gopath, "bin"),
-	}
-	if err := sh.RunWithV(env, "protoc",
-		"--proto_path=proto",
-		"--proto_path=third_party/googleapis",
-		"--go_out=gen",
-		"--go_opt=paths=source_relative",
-		"--go-grpc_out=gen",
-		"--go-grpc_opt=paths=source_relative",
-		"--grpc-gateway_out=gen",
-		"--grpc-gateway_opt=paths=source_relative",
-		"--openapiv2_out=gen",
-		"--openapiv2_opt=logtostderr=true",
-		"proto/item/item.proto",
-	); err != nil {
+	if err := sh.RunV("buf", "generate"); err != nil {
 		return err
 	}
-
-	return patchSwaggerHost("gen/item/item.swagger.json", "localhost:8080")
+	if err := patchSwaggerHost("gen/item/item.swagger.json", "localhost:8080"); err != nil {
+		return err
+	}
+	return Mock()
 }
 
 func patchSwaggerHost(swaggerFile, host string) error {
@@ -136,13 +124,46 @@ func Mock() error {
 	return sh.RunV("mockery")
 }
 
-// Build compiles the server binary to bin/server.
+// Build compiles the server binary for the host platform to bin/server.
 func Build() error {
 	if err := os.MkdirAll("bin", 0o755); err != nil {
 		return err
 	}
 	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0"},
 		"go", "build", "-ldflags=-s -w", "-o", bin, "./cmd/server")
+}
+
+// BuildLinuxAmd64 cross-compiles a static Linux amd64 binary to bin/server-linux-amd64.
+func BuildLinuxAmd64() error {
+	if err := os.MkdirAll("bin", 0o755); err != nil {
+		return err
+	}
+	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0", "GOOS": "linux", "GOARCH": "amd64"},
+		"go", "build", "-ldflags=-s -w", "-o", binLinuxAmd64, "./cmd/server")
+}
+
+// BuildLinuxArm64 cross-compiles a static Linux arm64 binary to bin/server-linux-arm64.
+func BuildLinuxArm64() error {
+	if err := os.MkdirAll("bin", 0o755); err != nil {
+		return err
+	}
+	return sh.RunWithV(map[string]string{"CGO_ENABLED": "0", "GOOS": "linux", "GOARCH": "arm64"},
+		"go", "build", "-ldflags=-s -w", "-o", binLinuxArm64, "./cmd/server")
+}
+
+// Build builds the Docker image for the host platform, tagged grpc-server:latest.
+func (Docker) Build() error {
+	return sh.RunV("docker", "build", "-t", "grpc-server:latest", ".")
+}
+
+// BuildAmd64 builds the Docker image for linux/amd64, tagged grpc-server:amd64.
+func (Docker) BuildAmd64() error {
+	return sh.RunV("docker", "build", "--platform", "linux/amd64", "-t", "grpc-server:amd64", ".")
+}
+
+// BuildArm64 builds the Docker image for linux/arm64, tagged grpc-server:arm64.
+func (Docker) BuildArm64() error {
+	return sh.RunV("docker", "build", "--platform", "linux/arm64", "-t", "grpc-server:arm64", ".")
 }
 
 // Run runs the server locally (requires Postgres to be up).
@@ -193,15 +214,17 @@ func CoverAll() error {
 	return sh.RunV("go", "tool", "cover", "-html=coverage.out", "-o=coverage.html")
 }
 
-// waitForPostgres polls pg_isready until Postgres is healthy.
+// waitForPostgres polls pg_isready until Postgres is healthy or 60 s elapses.
 func waitForPostgres() error {
-	for {
-		err := sh.Run("docker", "exec", container,
-			"pg_isready", "-U", "grpc", "-d", "grpc_experiment")
-		if err == nil {
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := sh.Run("docker", "exec", container,
+			"pg_isready", "-U", "grpc", "-d", "grpc_experiment"); err == nil {
 			return nil
 		}
+		time.Sleep(500 * time.Millisecond)
 	}
+	return fmt.Errorf("postgres did not become ready within 60s")
 }
 
 // runSQL pipes a SQL file into psql running inside the DB container.

@@ -20,7 +20,6 @@ coverage.html
 .vscode/
 *.swp
 *.swo
-*.swo
 
 # OS
 .DS_Store
@@ -29,5 +28,4 @@ Thumbs.db
 /.proxyai/
 /gen/
 /mocks/
-/third_party/
 /.claude/settings.local.json
