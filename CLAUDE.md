@@ -26,6 +26,7 @@ to read, reason about, extend, and test with minimal ambiguity.
 | Migrations          | Raw SQL applied via `docker exec psql`                                                     |
 | Mock generation     | `mockery` v2.53+ (generates typed mocks from interfaces)                                   |
 | Testing             | `testing` stdlib + `testify` + `bufconn` (in-process gRPC transport)                      |
+| DB test containers  | `github.com/testcontainers/testcontainers-go/modules/postgres` v0.41+                     |
 | Build tool          | `mage` (magefile.go — Go-native, replaces make)                                            |
 | Config              | Environment variables via `os.Getenv`                                                      |
 
@@ -242,17 +243,20 @@ mage build
 # Run the server locally
 mage run
 
-# Run unit + gRPC integration tests (no DB required)
+# Run all mock-based tests — no Docker, no DB (excludes //go:build integration files)
 mage test
 
-# Run all tests including DB integration tests
+# Run ALL tests including DB tests — spins up a Postgres container automatically
 mage testAll
 
-# Coverage report (no DB) — prints per-function % and writes coverage.html
+# Coverage report for mock-based tests — prints per-function % and writes coverage.html
 mage cover
 
-# Coverage report (all tests, requires DATABASE_URL)
+# Coverage report for all tests including DB — requires Docker
 mage coverAll
+
+# Run only repository DB tests directly (useful for debugging a single test)
+go test -tags=integration -v -run TestItemRepository ./internal/repository/...
 
 # List all available RPCs (uses gRPC reflection — server must be running)
 grpcurl -plaintext localhost:50051 list
@@ -271,7 +275,13 @@ CGO_ENABLED=1 go test -race ./...
 
 ## Testing Conventions
 
-There are three layers of tests in this project:
+Tests are split into two groups by build tag:
+
+| Group | Build tag | Run with | Requires |
+|-------|-----------|----------|----------|
+| Mock-based (Layers 1 & 2) | *(none)* | `mage test` / `go test ./...` | nothing |
+| DB integration (Layer 3) | `integration` | `mage testAll` / `go test -tags=integration ./...` | Docker |
+| End-to-end (Layer 4) | `e2e` | `mage testE2E` / `go test -tags=e2e -v ./internal/e2e/...` | Docker |
 
 ### Layer 1 — Handler unit tests (`internal/server/item_test.go`, `package server`)
 
@@ -305,15 +315,18 @@ passing it to the handler, so `context.Background()` will never match.
 
 ### Layer 3 — DB integration tests (`internal/repository/item_test.go`, `package repository`)
 
-Require a real PostgreSQL connection. Skipped automatically when `DATABASE_URL` is unset:
+Gated behind `//go:build integration`. Excluded from `go test ./...` by default.
 
-```go
-if os.Getenv("DATABASE_URL") == "" {
-    t.Skip("DATABASE_URL not set")
-}
-```
+A `TestMain` in `testmain_test.go` owns the database lifecycle for the whole package:
+- If `DATABASE_URL` is set, connects to that database (useful in CI with a pre-existing DB).
+- Otherwise, starts a `postgres:16-alpine` testcontainer, applies all migrations, runs the
+  tests, then tears the container down.
+- If Docker is unavailable and `DATABASE_URL` is unset, exits `0` (skip, not failure).
 
-Use `t.Cleanup` to delete rows created during tests so the DB stays clean.
+Both `testmain_test.go` and `item_test.go` carry the `//go:build integration` tag — add
+this tag to every new repository test file.
+
+Use `t.Cleanup` to delete rows created during tests so the DB stays clean between runs.
 
 ---
 
@@ -355,7 +368,7 @@ When adding a new resource (e.g. `Widget`), an agent should complete these steps
 9. [ ] Verify with `grpcurl` (gRPC) and `curl` (HTTP) before writing tests
 10. [ ] Write unit tests in `internal/server/widget_test.go` with a hand-written mock
 11. [ ] Write gRPC integration tests in `internal/server/widget_integration_test.go` using `bufconn` + mockery mock
-12. [ ] Write DB integration tests in `internal/repository/widget_test.go` (skip if no `DATABASE_URL`)
+12. [ ] Write DB integration tests in `internal/repository/widget_test.go` — add `//go:build integration` as the first line of every repository test file
 13. [ ] Update the Services table in `README.md`
 
 ---

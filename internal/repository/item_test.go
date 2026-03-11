@@ -1,9 +1,10 @@
+//go:build integration
+
 package repository
 
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -11,20 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// connect opens a pool from DATABASE_URL and skips the test if the var is unset.
-func connect(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set — skipping integration test")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	require.NoError(t, err, "open pool")
-	require.NoError(t, pool.Ping(context.Background()), "ping db")
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // deleteItem removes a row by ID so tests don't leave data behind.
 func deleteItem(t *testing.T, pool *pgxpool.Pool, id string) {
@@ -36,12 +23,11 @@ func deleteItem(t *testing.T, pool *pgxpool.Pool, id string) {
 // ----- Create -----
 
 func TestItemRepository_Create(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	item, err := repo.Create(context.Background(), "integration test item")
 	require.NoError(t, err)
-	t.Cleanup(func() { deleteItem(t, pool, item.ID) })
+	t.Cleanup(func() { deleteItem(t, testPool, item.ID) })
 
 	assert.NotEmpty(t, item.ID, "ID should be a UUID assigned by Postgres")
 	assert.Equal(t, "integration test item", item.Name)
@@ -50,15 +36,14 @@ func TestItemRepository_Create(t *testing.T) {
 }
 
 func TestItemRepository_Create_EmptyName(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	// The DB has NOT NULL on name but no CHECK constraint for empty string,
 	// so an empty string is technically valid at the DB level.
 	// This test documents the current behaviour: the repository passes it through.
 	item, err := repo.Create(context.Background(), "")
 	if err == nil {
-		t.Cleanup(func() { deleteItem(t, pool, item.ID) })
+		t.Cleanup(func() { deleteItem(t, testPool, item.ID) })
 	}
 	// No assertion on err — validation is the handler's responsibility.
 	// What matters is we don't panic and we either get an item or a DB error.
@@ -67,12 +52,11 @@ func TestItemRepository_Create_EmptyName(t *testing.T) {
 // ----- GetByID -----
 
 func TestItemRepository_GetByID(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	created, err := repo.Create(context.Background(), "get-by-id test")
 	require.NoError(t, err)
-	t.Cleanup(func() { deleteItem(t, pool, created.ID) })
+	t.Cleanup(func() { deleteItem(t, testPool, created.ID) })
 
 	fetched, err := repo.GetByID(context.Background(), created.ID)
 	require.NoError(t, err)
@@ -86,8 +70,7 @@ func TestItemRepository_GetByID(t *testing.T) {
 }
 
 func TestItemRepository_GetByID_NotFound(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	item, err := repo.GetByID(context.Background(), "00000000-0000-0000-0000-000000000000")
 
@@ -98,8 +81,7 @@ func TestItemRepository_GetByID_NotFound(t *testing.T) {
 }
 
 func TestItemRepository_GetByID_InvalidUUID(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	// Postgres will reject a non-UUID string with an error.
 	item, err := repo.GetByID(context.Background(), "not-a-uuid")
@@ -113,12 +95,11 @@ func TestItemRepository_GetByID_InvalidUUID(t *testing.T) {
 // ----- Update -----
 
 func TestItemRepository_Update(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	created, err := repo.Create(context.Background(), "original name")
 	require.NoError(t, err)
-	t.Cleanup(func() { deleteItem(t, pool, created.ID) })
+	t.Cleanup(func() { deleteItem(t, testPool, created.ID) })
 
 	updated, err := repo.Update(context.Background(), created.ID, "updated name")
 	require.NoError(t, err)
@@ -131,8 +112,7 @@ func TestItemRepository_Update(t *testing.T) {
 }
 
 func TestItemRepository_Update_NotFound(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	item, err := repo.Update(context.Background(), "00000000-0000-0000-0000-000000000000", "name")
 
@@ -144,8 +124,7 @@ func TestItemRepository_Update_NotFound(t *testing.T) {
 // ----- Delete -----
 
 func TestItemRepository_Delete(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	created, err := repo.Create(context.Background(), "to be deleted")
 	require.NoError(t, err)
@@ -159,8 +138,7 @@ func TestItemRepository_Delete(t *testing.T) {
 }
 
 func TestItemRepository_Delete_NotFound(t *testing.T) {
-	pool := connect(t)
-	repo := NewItemRepository(pool)
+	repo := NewItemRepository(testPool)
 
 	err := repo.Delete(context.Background(), "00000000-0000-0000-0000-000000000000")
 

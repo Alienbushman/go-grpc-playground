@@ -172,23 +172,32 @@ func Run() error {
 		"go", "run", "./cmd/server")
 }
 
-// Test runs unit and gRPC integration tests (no DB required).
+// Test runs all mock-based tests (handler unit tests + gRPC integration tests).
+// No Docker or database required — repository tests are excluded via build tag.
 func Test() error {
-	return sh.RunV("go", "test", "-count=1", "./internal/server/...")
+	return sh.RunV("go", "test", "-count=1", "./...")
 }
 
-// TestAll runs all tests including DB integration tests.
+// TestAll runs all tests including DB integration tests (requires Docker).
+// Repository tests spin up a Postgres testcontainer automatically.
+// Set DATABASE_URL to use an existing database instead of starting a container.
 func TestAll() error {
-	return sh.RunWithV(map[string]string{"DATABASE_URL": databaseURL()},
-		"go", "test", "-count=1", "./...")
+	return sh.RunV("go", "test", "-count=1", "-tags=integration", "./...")
 }
 
-// Cover runs unit + gRPC integration tests with coverage and opens the HTML report.
+// TestE2E runs end-to-end tests against the real gRPC server and HTTP gateway (requires Docker).
+// Spins up a Postgres testcontainer automatically.
+// Set DATABASE_URL to use an existing database instead of starting a container.
+func TestE2E() error {
+	return sh.RunV("go", "test", "-count=1", "-tags=e2e", "-v", "./internal/e2e/...")
+}
+
+// Cover runs mock-based tests with coverage and writes coverage.html.
 // Output: coverage.out (raw profile) and coverage.html (browser report).
 func Cover() error {
 	if err := sh.RunV("go", "test", "-count=1",
 		"-coverprofile=coverage.out", "-covermode=atomic",
-		"./internal/server/...",
+		"./...",
 	); err != nil {
 		return err
 	}
@@ -198,11 +207,10 @@ func Cover() error {
 	return sh.RunV("go", "tool", "cover", "-html=coverage.out", "-o=coverage.html")
 }
 
-// CoverAll runs all tests (including DB) with coverage and opens the HTML report.
-// Requires DATABASE_URL to be set (or uses the default local value).
+// CoverAll runs all tests including DB integration tests with coverage and writes coverage.html.
+// Requires Docker — repository tests spin up a Postgres testcontainer automatically.
 func CoverAll() error {
-	if err := sh.RunWithV(map[string]string{"DATABASE_URL": databaseURL()},
-		"go", "test", "-count=1",
+	if err := sh.RunV("go", "test", "-count=1", "-tags=integration",
 		"-coverprofile=coverage.out", "-covermode=atomic",
 		"./...",
 	); err != nil {
