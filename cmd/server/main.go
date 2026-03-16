@@ -75,6 +75,11 @@ func main() {
 	mux.HandlePath("GET", "/swagger.json", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
 		http.ServeFile(w, r, "gen/item/item.swagger.json")
 	})
+	// serve Swagger UI at /swagger — loads spec from /swagger.json
+	mux.HandlePath("GET", "/swagger", func(w http.ResponseWriter, r *http.Request, _ map[string]string) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(swaggerUIHTML))
+	})
 
 	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	if err := itemv1.RegisterItemServiceHandlerFromEndpoint(ctx, mux,
@@ -130,6 +135,28 @@ func initLogger() {
 	}
 	slog.SetDefault(slog.New(h))
 }
+
+const swaggerUIHTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>API Docs</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css">
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({
+  url: "/swagger.json",
+  dom_id: '#swagger-ui',
+  presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+  layout: "BaseLayout"
+})
+</script>
+</body>
+</html>`
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)

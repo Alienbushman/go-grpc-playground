@@ -19,7 +19,11 @@ FROM alpine:3.21
 # ca-certificates is required for any outbound TLS connections
 RUN apk add --no-cache ca-certificates
 
+WORKDIR /app
+
 COPY --from=builder /bin/server /bin/server
+# swagger spec is served at runtime from a path relative to WORKDIR
+COPY --from=builder /app/gen/item/item.swagger.json gen/item/item.swagger.json
 
 EXPOSE 50051
 EXPOSE 8080

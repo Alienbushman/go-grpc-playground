@@ -4,17 +4,13 @@ The server exposes two interfaces:
 - **gRPC** on `:50051` — use `grpcurl` (reflection is registered)
 - **HTTP/JSON** on `:8080` — use `curl` or any HTTP client (via the grpc-gateway)
 
-If you'd like a Swagger/OpenAPI description of the HTTP gateway you can
-generate a spec with the built‑in mage target (requires the
-`protoc-gen-openapiv2` plugin). Run:
+With the server running, Swagger UI is available at:
 
-```bash
-mage gen          # Go, gRPC, gateway handlers _and_ swagger spec
+```
+http://localhost:8080/swagger
 ```
 
-The file will appear in `gen/item/item.swagger.json`. You can serve it from the gateway
-to power Swagger UI, Redoc, etc. Or run `grpcui` against the gRPC port for a live
-Explorer UI (doesn't require a spec).
+The raw OpenAPI spec is at `http://localhost:8080/swagger.json` if you need it directly.
 
 ---
 

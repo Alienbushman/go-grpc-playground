@@ -65,15 +65,7 @@ level=INFO msg="gRPC server listening" port=50051
 level=INFO msg="HTTP gateway listening" port=8080
 ```
 
-**Try it immediately with Swagger UI** — the server serves the OpenAPI spec at
-`http://localhost:8080/swagger.json`. Open that URL in your browser to verify the spec loaded,
-then browse the API interactively in one of these ways:
-
-| Option | How |
-|--------|-----|
-| Local Swagger UI (Docker) | `docker run --rm -p 8081:8080 -e SWAGGER_JSON_URL=http://host.docker.internal:8080/swagger.json swaggerapi/swagger-ui` then open `http://localhost:8081` |
-| Online Swagger Editor | Open [editor.swagger.io](https://editor.swagger.io), click **File → Import URL**, enter `http://localhost:8080/swagger.json` |
-| Paste spec | `curl -s http://localhost:8080/swagger.json` → copy output → paste at [editor.swagger.io](https://editor.swagger.io) |
+**Try it immediately with Swagger UI** — open [http://localhost:8080/swagger](http://localhost:8080/swagger) in your browser.
 
 To stop the server press `Ctrl-C`, then `mage down` to stop Postgres.
 
