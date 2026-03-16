@@ -49,12 +49,44 @@ No standalone PostgreSQL installation required — Postgres runs in Docker.
 
 ## Quick Start
 
-### Option A — Full Docker (no Go toolchain required)
+### Returning developer — back in 30 seconds
+
+Already set up? These three commands are all you need:
+
+```bash
+mage gen     # regenerate gen/ and mocks/ (gitignored — needed after clone or proto change)
+mage dev     # start Postgres, apply migrations, run the server
+```
+
+The server is ready when you see:
+
+```
+level=INFO msg="gRPC server listening" port=50051
+level=INFO msg="HTTP gateway listening" port=8080
+```
+
+**Try it immediately with Swagger UI** — the server serves the OpenAPI spec at
+`http://localhost:8080/swagger.json`. Open that URL in your browser to verify the spec loaded,
+then browse the API interactively in one of these ways:
+
+| Option | How |
+|--------|-----|
+| Local Swagger UI (Docker) | `docker run --rm -p 8081:8080 -e SWAGGER_JSON_URL=http://host.docker.internal:8080/swagger.json swaggerapi/swagger-ui` then open `http://localhost:8081` |
+| Online Swagger Editor | Open [editor.swagger.io](https://editor.swagger.io), click **File → Import URL**, enter `http://localhost:8080/swagger.json` |
+| Paste spec | `curl -s http://localhost:8080/swagger.json` → copy output → paste at [editor.swagger.io](https://editor.swagger.io) |
+
+To stop the server press `Ctrl-C`, then `mage down` to stop Postgres.
+
+---
+
+### First-time setup
+
+#### Option A — Full Docker (no Go toolchain required)
 
 Only Docker Desktop is needed.
 
 ```bash
-# 1. Build and start everything (Postgres + migrations + server)
+# Build and start everything (Postgres + migrations + server)
 docker compose --profile full up --build
 ```
 
@@ -66,46 +98,38 @@ To stop and remove containers:
 docker compose --profile full down
 ```
 
----
+#### Option B — Local Go + Docker Postgres
 
-### Option B — Local Go + Docker Postgres
-
-Requires Go 1.26+ and Docker Desktop. All tools are installed via `go install`.
+Requires Go 1.26+ and Docker Desktop.
 
 ```bash
-# 1. Download Go module dependencies
+# 1. Install mage (the build tool that runs all other targets)
+go install github.com/magefile/mage@v1.16.0
+
+# 2. Install all remaining tools in one command
+mage setup
+
+# 3. Verify your environment
+mage doctor
+
+# 4. Download Go module dependencies and fetch buf BSR dependencies
 go mod download
-
-# 2. Install tools
-go install github.com/magefile/mage@latest
-go install github.com/bufbuild/buf/cmd/buf@latest
-go install github.com/vektra/mockery/v2@latest
-go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
-go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
-go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
-
-# 3. Fetch buf dependencies (generates buf.lock — only needed once after cloning)
 buf dep update
 
-# 4. Generate proto bindings and mocks (gen/ and mocks/ are not committed; mock is called by gen)
+# 5. Generate proto bindings and mocks (gen/ and mocks/ are not committed)
 mage gen
 
-# 5. Start Postgres and apply migrations
-mage db:migrateUp
-
-# 6. Run the server (DATABASE_URL defaults to the local Docker Postgres)
-mage run
+# 6. Start Postgres, apply migrations, and run the server
+mage dev
 ```
 
 The gRPC server listens on `:50051` and the HTTP/JSON gateway on `:8080` by default.
 
-> **Port note:** When running locally (Option B), Docker Compose binds Postgres to `5433`
-> (not `5432`) to avoid conflicts. `mage run` defaults `DATABASE_URL` to
+> **Port note:** Docker Compose binds Postgres to `5433` (not `5432`) to avoid conflicts.
+> `mage dev` / `mage run` default `DATABASE_URL` to
 > `postgres://grpc:grpc@localhost:5433/grpc_experiment?sslmode=disable` when the variable
-> is not set. In the full Docker setup (Option A), the server connects to Postgres
-> container-internally on port `5432`.
+> is not set. In the full Docker setup (Option A) the server connects to Postgres on `5432`
+> internally.
 
 ---
 
@@ -183,10 +207,15 @@ CRUD operations, error cases, and Swagger/OpenAPI generation.
 
 ```bash
 mage -l              # list all targets
+mage setup           # install all required tools (run once after cloning)
+mage doctor          # verify all tools are installed and print versions
 
-mage up              # start Postgres
-mage db:migrateUp    # start Postgres + apply migrations
-mage run             # run the server locally
+mage check           # build + run mock-based tests (no Docker — quick sanity check)
+
+mage dev             # start Postgres + apply migrations + run server (recommended)
+mage up              # start Postgres only
+mage db:migrateUp    # start Postgres + apply all migrations
+mage run             # run the server locally (Postgres must already be up)
 mage build           # compile to bin/server
 
 mage gen             # regenerate proto bindings (after editing a .proto file)

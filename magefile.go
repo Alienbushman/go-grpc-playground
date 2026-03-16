@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/magefile/mage/mg"
@@ -19,8 +22,6 @@ const (
 	binLinuxAmd64      = "bin/server-linux-amd64"
 	binLinuxArm64      = "bin/server-linux-arm64"
 	container          = "grpc_experiment_db"
-	migrationUp        = "migrations/000001_create_items.up.sql"
-	migrationDown      = "migrations/000001_create_items.down.sql"
 )
 
 func databaseURL() string {
@@ -38,6 +39,66 @@ type Docker mg.Namespace
 
 // Stack groups full-stack docker compose targets.
 type Stack mg.Namespace
+
+// Setup installs all required external tools at their pinned versions.
+// Install mage first (go install github.com/magefile/mage@v1.16.0), then run this.
+func Setup() error {
+	tools := []string{
+		"github.com/bufbuild/buf/cmd/buf@v1.50.1",
+		"google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.0",
+		"google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.0",
+		"github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@v2.28.0",
+		"github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@v2.28.0",
+		"github.com/vektra/mockery/v2@v2.53.0",
+		"github.com/fullstorydev/grpcurl/cmd/grpcurl@latest",
+	}
+	for _, t := range tools {
+		fmt.Println("installing", t)
+		if err := sh.RunV("go", "install", t); err != nil {
+			return err
+		}
+	}
+	fmt.Println("\nAll tools installed. Next: go mod download && buf dep update && mage gen")
+	return nil
+}
+
+// Doctor checks that all required tools are installed and prints their versions.
+func Doctor() error {
+	type check struct {
+		bin  string
+		args []string
+	}
+	checks := []check{
+		{"go", []string{"version"}},
+		{"mage", []string{"--version"}},
+		{"buf", []string{"--version"}},
+		{"protoc-gen-go", []string{"--version"}},
+		{"protoc-gen-go-grpc", []string{"--version"}},
+		{"protoc-gen-grpc-gateway", []string{"--version"}},
+		{"mockery", []string{"--version"}},
+		{"docker", []string{"--version"}},
+		{"grpcurl", []string{"--version"}},
+	}
+
+	allOK := true
+	for _, c := range checks {
+		if _, err := exec.LookPath(c.bin); err != nil {
+			fmt.Printf("✗ %-30s not found  →  run: mage setup\n", c.bin)
+			allOK = false
+			continue
+		}
+		out, _ := exec.Command(c.bin, c.args...).CombinedOutput()
+		version := strings.TrimSpace(strings.SplitN(string(out), "\n", 2)[0])
+		if version == "" {
+			version = "found"
+		}
+		fmt.Printf("✓ %-30s %s\n", c.bin, version)
+	}
+	if !allOK {
+		return fmt.Errorf("one or more required tools are missing — run `mage setup`")
+	}
+	return nil
+}
 
 // Up starts the Postgres container.
 func Up() error {
@@ -59,19 +120,55 @@ func (Stack) Down() error {
 	return sh.RunV("docker", "compose", "--profile", "full", "down")
 }
 
-// MigrateUp applies all migrations (starts Postgres first, waits for health).
+// MigrateUp applies all migrations in order (starts Postgres first, waits for health).
 func (DB) MigrateUp() error {
 	mg.Deps(Up)
 	fmt.Println("Waiting for Postgres...")
 	if err := waitForPostgres(); err != nil {
 		return err
 	}
-	return runSQL(migrationUp)
+	files, err := filepath.Glob("migrations/*.up.sql")
+	if err != nil {
+		return fmt.Errorf("glob migrations: %w", err)
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		fmt.Println("applying", f)
+		if err := runSQL(f); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// MigrateDown rolls back the last migration.
+// MigrateDown rolls back all migrations in reverse order.
 func (DB) MigrateDown() error {
-	return runSQL(migrationDown)
+	files, err := filepath.Glob("migrations/*.down.sql")
+	if err != nil {
+		return fmt.Errorf("glob migrations: %w", err)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(files)))
+	for _, f := range files {
+		fmt.Println("rolling back", f)
+		if err := runSQL(f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Check builds the server and runs all mock-based tests.
+// No Docker required — use this to quickly verify a fresh checkout is healthy.
+func Check() error {
+	mg.Deps(Build)
+	return Test()
+}
+
+// Dev starts Postgres, applies all migrations, then runs the server.
+// This is the recommended target for local development after a fresh checkout.
+func Dev() error {
+	mg.Deps(DB.MigrateUp)
+	return Run()
 }
 
 // Gen regenerates proto bindings from all proto files under proto/.
